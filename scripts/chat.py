@@ -366,7 +366,7 @@ def main():
             else:
                 if not TORCH_AVAILABLE:
                     print(f"\n{Colors.RED}✗ ERROR: PyTorch required for GPU checkpoints{Colors.END}")
-                    print(f"  Install with: pip install torch")
+                    print(f"  Install with: uv pip install torch")
                     continue
                 response = generate_response_gpu(checkpoint_data, uchars, context, temperature, max_tokens=300, show_thinking=True)
             

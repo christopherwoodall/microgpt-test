@@ -18,11 +18,12 @@ A complete training and inference pipeline for Karpathy's [microGPT](https://git
 git clone https://github.com/yourusername/microgpt-test.git
 cd microgpt-test
 
-# Install with pip (includes all dependencies)
-pip install -e .
+# Install with uv (super fast!)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv pip install -e .
 
 # Or for GPU support:
-pip install -e ".[gpu]"
+uv pip install -e ".[gpu]"
 ```
 
 ### Basic Usage
@@ -44,14 +45,16 @@ python scripts/generate.py --checkpoint checkpoints/wilde_step_10000_gpu.pkl --n
 python scripts/visualize.py --corpus wilde --mode all
 ```
 
-### Or use entry points (after pip install):
+### Or use entry points (after uv install):
 
 ```bash
 microgpt-train --corpus wilde --steps 1000
 microgpt-train-gpu --corpus wilde --steps 10000
+microgpt-train-alternating --corpora wilde lovecraft --total-steps 20000  # 🎭 NEW!
 microgpt-chat --checkpoint checkpoints/wilde_step_10000_gpu.pkl
 microgpt-generate --checkpoint checkpoints/wilde_step_10000_gpu.pkl --num-samples 10
 microgpt-viz --corpus wilde
+microgpt-convert model.pkl --to gpu
 ```
 
 ---
@@ -210,7 +213,7 @@ python scripts/generate.py --checkpoint checkpoints/wilde_step_10000.pkl \
 
 ```bash
 # Install PyTorch with CUDA support
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
 
 ### Usage
@@ -265,12 +268,97 @@ This script requires a GPU for training. You have options:
    python scripts/train.py --corpus wilde --steps 1000
 
 2. 🎮 Install PyTorch with CUDA:
-   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 3. 🐳 Use a Docker container with GPU support
 
 4. ☁️  Run on Google Colab (free GPU):
    https://colab.research.google.com
+```
+
+---
+
+## 🎭 Alternating Corpus Training (`scripts/train_alternating.py`)
+
+**GPU ONLY** - Train on multiple corpora in random chunks to create unique hybrid writing styles!
+
+Perfect for blending Wilde's aestheticism with Lovecraft's cosmic horror, or creating entirely new literary voices.
+
+### Concept
+
+Instead of training on one corpus, alternate between them in random-sized chunks:
+- Train on Wilde for 127 steps
+- Switch to Lovecraft for 342 steps
+- Back to Wilde for 89 steps
+- Repeat until total steps reached
+
+The model learns to blend styles and creates fascinating hybrid prose!
+
+### Usage
+
+```bash
+python scripts/train_alternating.py \
+  --corpora wilde lovecraft \
+  --total-steps 20000 \
+  --min-chunk 100 \
+  --max-chunk 500
+```
+
+### Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--corpora` | **Required.** List of corpora to alternate (e.g., `wilde lovecraft mixed`) | - |
+| `--total-steps` | **Required.** Total training steps | - |
+| `--min-chunk` | Minimum steps per corpus chunk | 100 |
+| `--max-chunk` | Maximum steps per corpus chunk | 500 |
+| `--batch-size` | Training batch size | 4 |
+| `--validate-interval` | Validate on all corpora every N steps | 500 |
+
+### Examples
+
+```bash
+# Classic Wilde + Lovecraft alternation
+python scripts/train_alternating.py \
+  --corpora wilde lovecraft \
+  --total-steps 20000
+
+# All three corpora with large chunks
+python scripts/train_alternating.py \
+  --corpora wilde lovecraft mixed \
+  --total-steps 30000 \
+  --min-chunk 200 \
+  --max-chunk 800
+
+# Quick test with small chunks
+python scripts/train_alternating.py \
+  --corpora wilde lovecraft \
+  --total-steps 5000 \
+  --min-chunk 50 \
+  --max-chunk 200 \
+  --batch-size 8
+```
+
+### What to Expect
+
+**Output Features:**
+- Color-coded progress showing current corpus (Purple=Wilde, Blue=Lovecraft, Cyan=Mixed)
+- Random chunk sizes keep training dynamic
+- Validation on ALL corpora every N steps
+- Creates fascinating hybrid writing styles!
+
+**Example Generated Text (Wilde + Lovecraft):**
+```
+The garden was beautiful beyond measure, yet I could not shake the 
+feeling that something ancient and terrible lurked beneath the roses...
+```
+
+### Entry Point
+
+```bash
+microgpt-train-alternating \
+  --corpora wilde lovecraft \
+  --total-steps 20000
 ```
 
 ---
@@ -486,7 +574,7 @@ A: Model needs more training. Try 10K+ steps. Early training (1K steps) produces
 **Q: "ImportError: No module named 'torch'" when running train_gpu.py**
 A: Install PyTorch with CUDA support:
    ```bash
-   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
    ```
 
 **Q: "GPU NOT DETECTED" error**
@@ -571,12 +659,13 @@ Original microGPT by Andrej Karpathy ([@karpathy](https://twitter.com/karpathy))
 
 ## 📦 Package Installation
 
-After `pip install -e .`, use these convenient entry points:
+After `uv pip install -e .`, use these convenient entry points:
 
 ```bash
 # Training
 microgpt-train --corpus wilde --steps 1000          # CPU
 microgpt-train-gpu --corpus wilde --steps 10000     # GPU (fast!)
+microgpt-train-alternating --corpora wilde lovecraft --total-steps 20000  # 🎭 Multi-corpus
 
 # Inference
 microgpt-chat --checkpoint model.pkl                # Interactive chat

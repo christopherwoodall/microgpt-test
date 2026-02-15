@@ -49,6 +49,7 @@ microgpt-chat = "scripts.chat:main"
 microgpt-generate = "scripts.generate:main"
 microgpt-viz = "scripts.visualize:main"
 microgpt-convert = "scripts.convert_checkpoint:main"
+microgpt-train-alternating = "scripts.train_alternating:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/microgpt-test"

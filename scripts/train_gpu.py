@@ -40,7 +40,7 @@ if not torch.cuda.is_available():
     print("\n1. 💻 Use CPU training instead:")
     print("   python scripts/train.py --corpus wilde --steps 1000")
     print("\n2. 🎮 Install PyTorch with CUDA:")
-    print("   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118")
+    print("   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118")
     print("\n3. 🐳 Use a Docker container with GPU support")
     print("\n4. ☁️  Run on Google Colab (free GPU):")
     print("   https://colab.research.google.com")
