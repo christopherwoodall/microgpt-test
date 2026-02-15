@@ -43,21 +43,24 @@ dev = [
 ]
 
 [project.scripts]
-microgpt-train = "scripts.train:main"
-microgpt-train-gpu = "scripts.train_gpu:main"
-microgpt-chat = "scripts.chat:main"
-microgpt-generate = "scripts.generate:main"
-microgpt-viz = "scripts.visualize:main"
-microgpt-convert = "scripts.convert_checkpoint:main"
-microgpt-train-alternating = "scripts.train_alternating:main"
+microgpt-train = "micro_trainer.scripts.train:main"
+microgpt-train-gpu = "micro_trainer.scripts.train_gpu:main"
+microgpt-chat = "micro_trainer.scripts.chat:main"
+microgpt-generate = "micro_trainer.scripts.generate:main"
+microgpt-viz = "micro_trainer.scripts.visualize:main"
+microgpt-convert = "micro_trainer.scripts.convert_checkpoint:main"
+microgpt-train-alternating = "micro_trainer.scripts.train_alternating:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/microgpt-test"
 Repository = "https://github.com/yourusername/microgpt-test"
 Documentation = "https://github.com/yourusername/microgpt-test#readme"
 
-[tool.setuptools]
-py-modules = ["microgpt", "config"]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
 
 [tool.black]
 line-length = 100

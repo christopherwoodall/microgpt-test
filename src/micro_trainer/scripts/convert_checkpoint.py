@@ -97,7 +97,7 @@ def convert_gpu_to_cpu(gpu_checkpoint_path, output_path=None):
     
     # Import here to avoid loading if not needed
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from microgpt import Value
+    from micro_trainer.microgpt import Value
     
     gpu_checkpoint = torch.load(gpu_checkpoint_path, map_location='cpu')
     

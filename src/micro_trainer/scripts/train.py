@@ -14,11 +14,8 @@ from datetime import datetime
 # Increase recursion limit for deep backward passes with 2-layer model
 sys.setrecursionlimit(10000)
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from microgpt import Value, linear, softmax, rmsnorm, matrix
-import config
+from micro_trainer.microgpt import Value, linear, softmax, rmsnorm, matrix
+from micro_trainer import config
 
 random.seed(42)
 

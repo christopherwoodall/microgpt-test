@@ -20,10 +20,7 @@ import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import config
+from micro_trainer import config
 
 # Set random seeds for reproducibility
 torch.manual_seed(42)
