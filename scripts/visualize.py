@@ -1,288 +1,298 @@
 #!/usr/bin/env python
 """
-Visualization suite for microgpt training
-Generate ASCII art, progress bars, and training charts
+Rich ASCII visualization suite for microgpt training
+Generate beautiful charts, progress bars, and training summaries
 """
 
 import sys
+import json
 import pickle
 import argparse
 from pathlib import Path
-from datetime import datetime, timedelta
-import math
+from datetime import timedelta
 
-# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
+
+
+class Colors:
+    """ANSI color codes"""
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
 
 
 class Visualizer:
     """Heavy visualization engine for microgpt"""
     
     def __init__(self):
-        self.colors = config.VIZ_COLORS
-        self.arch = config.ARCH_VIZ
-        self.width = 70
-    
-    def _color(self, text, color_key):
-        """Add ANSI color codes"""
-        color_map = {
-            'red': '\033[91m',
-            'green': '\033[92m',
-            'yellow': '\033[93m',
-            'blue': '\033[94m',
-            'magenta': '\033[95m',
-            'cyan': '\033[96m',
-            'white': '\033[97m',
-            'bold': '\033[1m',
-            'reset': '\033[0m'
+        self.width = 78
+        self.chars = {
+            'h_line': '─',
+            'v_line': '│',
+            'tl': '┌',
+            'tr': '┐',
+            'bl': '└',
+            'br': '┘',
+            'cross': '┼',
+            't_down': '┬',
+            't_up': '┴',
+            't_right': '├',
+            't_left': '┤',
+            'block': '█',
+            'shade': '░',
+            'dot': '●',
+            'star': '★',
+            'arrow': '→',
+            'check': '✓',
         }
-        return f"{color_map.get(color_key, '')}{text}{color_map['reset']}"
     
-    def draw_header(self, title, subtitle=""):
-        """Draw a fancy header"""
-        print("\n" + "=" * self.width)
-        print(f"  {title}")
-        if subtitle:
-            print(f"  {subtitle}")
-        print("=" * self.width + "\n")
+    def _color(self, text, color):
+        """Apply color to text"""
+        return f"{color}{text}{Colors.END}"
     
-    def draw_architecture(self):
-        """Draw the model architecture"""
-        self.draw_header("MICROGPT ARCHITECTURE", "Scaled up for book-length text generation")
+    def _box(self, title, content, color=Colors.CYAN):
+        """Draw a box with title"""
+        title_str = f" {title} "
+        title_len = len(title_str)
+        remaining = self.width - title_len - 2
+        left = remaining // 2
+        right = remaining - left
         
-        # Parameter count
-        embedding_params = config.n_embd * 100 + config.n_embd * config.block_size
+        top = self.chars['tl'] + self.chars['h_line'] * left + title_str + self.chars['h_line'] * right + self.chars['tr']
+        bottom = self.chars['bl'] + self.chars['h_line'] * (self.width - 2) + self.chars['br']
         
-        layer_params = 4 * config.n_embd * config.n_embd + \
-                      config.n_embd * 4 * config.n_embd * 2
+        lines = content.split('\n')
+        content_lines = []
+        for line in lines:
+            if len(line) > self.width - 4:
+                line = line[:self.width-7] + '...'
+            padded = line.center(self.width - 4)
+            content_lines.append(f"{self.chars['v_line']} {padded} {self.chars['v_line']}")
         
-        total_params = embedding_params + config.n_layer * layer_params
-        
-        print(f"  Input/Output")
-        print(f"  ├─ Token Embedding:     {config.n_embd} dims")
-        print(f"  ├─ Position Embedding:  {config.block_size} positions")
-        print(f"  └─ Vocabulary Size:     ~100 unique chars")
-        print()
-        print(f"  Transformer Stack ({config.n_layer} layers)")
-        print(f"  ├─ Embedding Dimension: {config.n_embd}")
-        print(f"  ├─ Attention Heads:     {config.n_head} (each {config.head_dim} dims)")
-        print(f"  ├─ MLP Hidden Dim:      {4 * config.n_embd}")
-        print(f"  ├─ Sequence Length:     {config.block_size} tokens")
-        print(f"  └─ Normalization:       RMSNorm")
-        print()
-        print(f"  Total Parameters:       ~{total_params:,}")
-        print()
-        
-        # Visual diagram
-        print("  Architecture Diagram:")
-        print("  " + "─" * 40)
-        print(f"  │  Input Tokens (0-{config.block_size-1})")
-        print("  │         ↓")
-        print(f"  │  ┌─────────────────────┐")
-        print(f"  │  │ Token Embedding     │ {config.n_embd}D")
-        print(f"  │  │ Positional Embedding│ {config.block_size} positions")
-        print(f"  │  └─────────────────────┘")
-        print("  │         ↓")
-        
-        for i in range(config.n_layer):
-            print(f"  │  ╔═════════════════════╗ Layer {i+1}/{config.n_layer}")
-            print(f"  │  ║  RMSNorm            ║")
-            print(f"  │  ║  Multi-Head Attention ({config.n_head} heads) ║")
-            print(f"  │  ║  Residual Connection ║")
-            print(f"  │  ║  RMSNorm            ║")
-            print(f"  │  ║  MLP (4x expansion) ║")
-            print(f"  │  ║  Residual Connection ║")
-            print("  │  ╚═════════════════════╝")
-            if i < config.n_layer - 1:
-                print("  │         ↓")
-        
-        print("  │         ↓")
-        print(f"  │  ┌─────────────────────┐")
-        print(f"  │  │ Language Model Head │ Logits")
-        print(f"  │  └─────────────────────┘")
-        print("  │         ↓")
-        print(f"  │  Softmax + Sampling → Next Token")
-        print("  " + "─" * 40)
+        result = [self._color(top, color)]
+        result.extend(content_lines)
+        result.append(self._color(bottom, color))
+        return '\n'.join(result)
     
-    def draw_training_progress(self, history_path):
-        """Draw training progress from history file"""
+    def _sparkline(self, data, width=50):
+        """Generate sparkline chart"""
+        if not data:
+            return ""
+        
+        chars = '▁▂▃▄▅▆▇█'
+        min_val, max_val = min(data), max(data)
+        if max_val == min_val:
+            return chars[0] * min(width, len(data))
+        
+        scaled = [(v - min_val) / (max_val - min_val) * (len(chars) - 1) for v in data]
+        spark = ''.join(chars[int(s)] for s in scaled)
+        
+        if len(spark) > width:
+            step = len(spark) // width
+            spark = ''.join(spark[i*step] for i in range(width))
+        
+        return spark
+    
+    def _progress_bar(self, current, total, width=40):
+        """Generate progress bar"""
+        if total == 0:
+            return ""
+        filled = int(width * current / total)
+        bar = self.chars['block'] * filled + self.chars['shade'] * (width - filled)
+        percent = 100 * current / total
+        return f"[{bar}] {percent:5.1f}%"
+    
+    def _histogram(self, values, bins=10, width=40):
+        """Generate ASCII histogram"""
+        if not values:
+            return ""
+        
+        min_val, max_val = min(values), max(values)
+        if max_val == min_val:
+            return "All values equal"
+        
+        # Create bins
+        bin_edges = [min_val + (max_val - min_val) * i / bins for i in range(bins + 1)]
+        counts = [0] * bins
+        
+        for v in values:
+            bin_idx = min(int((v - min_val) / (max_val - min_val) * bins), bins - 1)
+            counts[bin_idx] += 1
+        
+        max_count = max(counts) if counts else 1
+        
+        lines = []
+        for i, count in enumerate(counts):
+            bar_len = int(width * count / max_count) if max_count > 0 else 0
+            bar = self.chars['block'] * bar_len
+            low, high = bin_edges[i], bin_edges[i+1]
+            lines.append(f"{low:6.2f}-{high:6.2f} │{bar} {count}")
+        
+        return '\n'.join(lines)
+    
+    def show_architecture(self):
+        """Display model architecture"""
+        content = f"""
+Model: GPT-2 Style Transformer
+Embedding Dim: {config.n_embd}  |  Heads: {config.n_head}  |  Layers: {config.n_layer}
+Seq Length: {config.block_size}  |  MLP Ratio: 4x  |  Norm: RMSNorm
+        """.strip()
+        
+        print(self._box("MICROGPT ARCHITECTURE", content, Colors.BLUE))
+        print()
+        
+        # Parameter breakdown
+        embed_params = 100 * config.n_embd + config.block_size * config.n_embd
+        layer_params = 4 * config.n_embd * config.n_embd + config.n_embd * 4 * config.n_embd * 2
+        total_params = embed_params + config.n_layer * layer_params
+        
+        print(f"  {self.chars['arrow']} Parameter Breakdown:")
+        print(f"    Embeddings:     {embed_params:>10,}")
+        print(f"    Per Layer:      {layer_params:>10,}")
+        print(f"    Total ({config.n_layer}L):    {self._color(f'{total_params:,}', Colors.GREEN)}")
+        print()
+    
+    def show_training_summary(self, history_path):
+        """Display training summary from history file"""
         if not Path(history_path).exists():
-            print(f"History file not found: {history_path}")
+            print(f"❌ History file not found: {history_path}")
             return
         
         with open(history_path, 'rb') as f:
             history = pickle.load(f)
         
-        self.draw_header(
-            f"TRAINING PROGRESS: {history['corpus'].upper()}",
-            f"Total Parameters: {history['total_params']:,} | Vocab Size: {history['vocab_size']}"
-        )
+        # Header
+        corpus = history.get('corpus', 'unknown')
+        content = f"Corpus: {corpus.upper()}"
+        print(self._box("TRAINING SUMMARY", content, Colors.GREEN))
+        print()
         
-        # Loss curve (ASCII)
-        if history['train_loss']:
-            print("  Training Loss Curve:")
+        # Stats
+        total_params = history.get('total_params', 0)
+        vocab_size = history.get('vocab_size', 0)
+        steps = history.get('steps', [])
+        train_loss = history.get('train_loss', [])
+        val_loss = history.get('val_loss', [])
+        timestamps = history.get('timestamps', [])
+        
+        print(f"  {self.chars['star']} Model Statistics:")
+        print(f"    Total Parameters: {total_params:,}")
+        print(f"    Vocabulary Size:  {vocab_size}")
+        print(f"    Training Steps:   {len(steps)}")
+        if timestamps:
+            total_time = timestamps[-1]
+            print(f"    Total Time:       {timedelta(seconds=int(total_time))}")
+            if len(steps) > 1:
+                avg_time = total_time / len(steps)
+                print(f"    Avg Step Time:    {avg_time:.3f}s")
+        print()
+        
+        # Loss statistics
+        if train_loss:
+            print(f"  {self.chars['star']} Loss Statistics:")
+            print(f"    Initial Train:  {train_loss[0]:.4f}")
+            print(f"    Final Train:    {self._color(f'{train_loss[-1]:.4f}', Colors.YELLOW)}")
+            print(f"    Min Train:      {min(train_loss):.4f}")
+            print(f"    Max Train:      {max(train_loss):.4f}")
+            if len(train_loss) > 1:
+                improvement = train_loss[0] - train_loss[-1]
+                print(f"    Improvement:    {self._color(f'{improvement:.4f}', Colors.GREEN)}")
+        
+        if val_loss:
+            print(f"    Final Val:      {self._color(f'{val_loss[-1]:.4f}', Colors.CYAN)}")
+        print()
+        
+        # Sparkline
+        if train_loss:
+            print(f"  {self.chars['star']} Training Loss Trend:")
+            spark = self._sparkline(train_loss, width=60)
+            print(f"    {spark}")
+            print(f"    {train_loss[0]:.2f} {' ' * 52} {train_loss[-1]:.2f}")
             print()
-            self._draw_ascii_chart(
-                history['steps'],
-                history['train_loss'],
-                "Step",
-                "Loss",
-                color='red'
-            )
+        
+        # Histogram
+        if train_loss:
+            print(f"  {self.chars['star']} Loss Distribution:")
+            print(self._histogram(train_loss, bins=8, width=30))
             print()
-        
-        # Validation loss
-        if history.get('val_loss'):
-            print("  Validation Loss Points:")
-            val_steps = [history['steps'][i] for i in range(0, len(history['steps']), 
-                        len(history['steps']) // max(1, len(history['val_loss'])))][:len(history['val_loss'])]
-            for step, loss in zip(val_steps, history['val_loss']):
-                bar = "█" * int(loss * 10)
-                print(f"    Step {step:5d}: {loss:.4f} {bar}")
-            print()
-        
-        # Learning rate schedule
-        if history['learning_rates']:
-            print("  Learning Rate Schedule:")
-            self._draw_ascii_chart(
-                history['steps'],
-                history['learning_rates'],
-                "Step",
-                "LR",
-                color='blue'
-            )
-            print()
-        
-        # Training time
-        if history['timestamps']:
-            total_time = history['timestamps'][-1]
-            print(f"  Total Training Time: {timedelta(seconds=int(total_time))}")
-            avg_step_time = total_time / len(history['timestamps'])
-            print(f"  Average Step Time: {avg_step_time:.3f}s")
-            print()
-        
-        # Statistics
-        if history['train_loss']:
-            print("  Loss Statistics:")
-            print(f"    Initial:  {history['train_loss'][0]:.4f}")
-            print(f"    Final:    {history['train_loss'][-1]:.4f}")
-            print(f"    Min:      {min(history['train_loss']):.4f}")
-            print(f"    Max:      {max(history['train_loss']):.4f}")
-            print(f"    Improvement: {history['train_loss'][0] - history['train_loss'][-1]:.4f}")
-        
-        # Progress bar
-        if history['steps']:
-            print("\n  Training Progress:")
-            progress = history['steps'][-1] / max(history['steps'])
-            filled = int(50 * progress)
-            bar = "█" * filled + "░" * (50 - filled)
-            print(f"  [{bar}] {progress*100:.1f}%")
     
-    def _draw_ascii_chart(self, x_data, y_data, x_label, y_label, color='white', height=15):
-        """Draw ASCII line chart"""
-        if not y_data:
+    def show_json_logs(self, json_path):
+        """Display recent entries from JSON log"""
+        if not Path(json_path).exists():
+            print(f"❌ JSON log not found: {json_path}")
             return
         
-        min_y, max_y = min(y_data), max(y_data)
-        range_y = max_y - min_y if max_y != min_y else 1
+        entries = []
+        with open(json_path, 'r') as f:
+            for line in f:
+                try:
+                    entries.append(json.loads(line.strip()))
+                except:
+                    pass
         
-        # Normalize to chart height
-        normalized = [int((y - min_y) / range_y * (height - 1)) for y in y_data]
+        if not entries:
+            print("No log entries found")
+            return
         
-        # Draw chart
-        for row in range(height - 1, -1, -1):
-            y_val = min_y + (range_y * row / (height - 1))
-            line = f"  {y_val:8.4f} │"
+        print(self._box("RECENT TRAINING LOGS", f"{len(entries)} entries", Colors.YELLOW))
+        print()
+        
+        # Show last 10 entries
+        recent = entries[-10:]
+        print(f"  {'Step':>6} │ {'Loss':>8} │ {'LR':>10} │ {'Time':>8} │ {'Speed':>8}")
+        print(f"  {'─' * 6}┼{'─' * 10}┼{'─' * 12}┼{'─' * 10}┼{'─' * 10}")
+        
+        for entry in recent:
+            step = entry.get('step', 0)
+            loss = entry.get('train_loss', entry.get('val_loss', 0))
+            lr = entry.get('learning_rate', 0)
+            elapsed = entry.get('elapsed_seconds', 0)
+            speed = entry.get('steps_per_second', 0)
             
-            # Plot points
-            for val in normalized:
-                if val == row:
-                    line += self._color("●", color)
-                elif val > row:
-                    line += "│"
-                else:
-                    line += " "
-            print(line)
-        
-        # X-axis
-        print(f"          └{'─' * len(y_data)}")
-        
-        # X labels (show first, middle, last)
-        x_line = "           "
-        if len(x_data) >= 3:
-            x_line += f"{x_data[0]}"
-            x_line += " " * (len(x_data) // 2 - len(str(x_data[0])))
-            x_line += f"{x_data[len(x_data)//2]}"
-            x_line += " " * (len(x_data) - len(x_data)//2 - len(str(x_data[-1])) - 1)
-            x_line += f"{x_data[-1]}"
-        print(x_line)
-    
-    def draw_generation_header(self, checkpoint_path, temperature, num_samples):
-        """Draw generation session header"""
-        self.draw_header(
-            "TEXT GENERATION",
-            f"Checkpoint: {checkpoint_path} | Temperature: {temperature} | Samples: {num_samples}"
-        )
-    
-    def draw_sample_card(self, sample_num, text, corpus_type=""):
-        """Draw a nice sample card"""
-        border = "╔" + "═" * 68 + "╗"
-        footer = "╚" + "═" * 68 + "╝"
-        
-        print(border)
-        header = f" Sample {sample_num}"
-        if corpus_type:
-            header += f" [{corpus_type}]"
-        header = header[:68].center(68)
-        print(f"║{header}║")
-        print(f"╠" + "═" * 68 + "╣")
-        
-        # Wrap text
-        lines = []
-        current_line = ""
-        for word in text.split():
-            if len(current_line) + len(word) + 1 <= 66:
-                current_line += word + " "
+            if 'val_loss' in entry:
+                marker = self._color('✓ VAL', Colors.CYAN)
+                print(f"  {step:>6} │ {loss:>8.4f} │ {marker:>10} │ {elapsed:>7.0f}s │")
             else:
-                if current_line:
-                    lines.append(current_line.strip())
-                current_line = word + " "
-        if current_line:
-            lines.append(current_line.strip())
-        
-        for line in lines[:20]:  # Limit to 20 lines
-            print(f"║ {line:<66} ║")
-        
-        if len(lines) > 20:
-            print(f"║ ... ({len(lines) - 20} more lines) ...".center(68) + "║")
-        
-        print(footer)
+                print(f"  {step:>6} │ {loss:>8.4f} │ {lr:>10.6f} │ {elapsed:>7.0f}s │ {speed:>7.2f}/s")
         print()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize microgpt training")
-    parser.add_argument("--mode", choices=["arch", "training", "all"], default="all")
-    parser.add_argument("--history", type=str, help="Path to training history file")
-    parser.add_argument("--corpus", type=str, help="Corpus name for history lookup")
+    parser.add_argument("--mode", choices=["arch", "summary", "logs", "all"], default="all")
+    parser.add_argument("--corpus", type=str, help="Corpus name for auto-detecting files")
+    parser.add_argument("--history", type=str, help="Path to history pickle file")
+    parser.add_argument("--json", type=str, help="Path to JSON log file")
     args = parser.parse_args()
     
     viz = Visualizer()
     
-    if args.mode in ["arch", "all"]:
-        viz.draw_architecture()
+    # Auto-detect files if corpus specified
+    corpus = args.corpus
+    history_path = args.history
+    json_path = args.json
     
-    if args.mode in ["training", "all"]:
-        history_path = args.history
-        if not history_path and args.corpus:
-            history_path = Path(config.checkpoint_dir) / f"{args.corpus}_history.pkl"
-        
-        if history_path:
-            viz.draw_training_progress(history_path)
-        else:
-            print("No history file specified. Use --history or --corpus")
+    if corpus and not history_path:
+        history_path = Path(config.checkpoint_dir) / f"{corpus}_history.pkl"
+    if corpus and not json_path:
+        json_path = Path(config.checkpoint_dir) / f"{corpus}_training_log.jsonl"
+    
+    if args.mode in ["arch", "all"]:
+        viz.show_architecture()
+    
+    if args.mode in ["summary", "all"] and history_path:
+        viz.show_training_summary(history_path)
+    
+    if args.mode in ["logs", "all"] and json_path:
+        viz.show_json_logs(json_path)
 
 
 if __name__ == "__main__":

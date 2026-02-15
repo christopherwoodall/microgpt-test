@@ -1,13 +1,17 @@
 #!/usr/bin/env python
-"""Train microgpt on Gutenberg corpus"""
+"""Train microgpt on Gutenberg corpus with rich logging and visualization"""
 
 import os
 import sys
+import json
 import pickle
 import random
 import argparse
 from pathlib import Path
 from datetime import datetime
+
+# Increase recursion limit for deep backward passes with 2-layer model
+sys.setrecursionlimit(10000)
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,7 +30,7 @@ def load_corpus(corpus_name, split="train"):
 
 
 def initialize_model(vocab_size):
-    """Initialize model parameters - COPY from microgpt.py lines 47-56"""
+    """Initialize model parameters"""
     state_dict = {
         'wte': matrix(vocab_size, config.n_embd),
         'wpe': matrix(config.block_size, config.n_embd),
@@ -49,7 +53,7 @@ def save_checkpoint(state_dict, step, corpus_name, vocab):
     filepath = Path(config.checkpoint_dir) / f"{corpus_name}_step_{step}.pkl"
     with open(filepath, 'wb') as f:
         pickle.dump(checkpoint, f)
-    print(f"Saved checkpoint: {filepath}")
+    print(f"📦 Saved checkpoint: {filepath}")
 
 
 def load_checkpoint(filepath):
@@ -60,7 +64,7 @@ def load_checkpoint(filepath):
 
 
 def gpt(token_id, pos_id, keys, values, state_dict):
-    """Forward pass - COPY from microgpt.py lines 59-83, add state_dict parameter"""
+    """Forward pass with state_dict parameter"""
     tok_emb = state_dict['wte'][token_id]
     pos_emb = state_dict['wpe'][pos_id]
     x = [t + p for t, p in zip(tok_emb, pos_emb)]
@@ -106,7 +110,7 @@ def gpt(token_id, pos_id, keys, values, state_dict):
 
 
 def forward_pass(tokens, state_dict):
-    """Forward pass returning loss - COPY pattern from microgpt.py lines 85-96"""
+    """Forward pass returning loss"""
     keys = [[] for _ in range(config.n_layer)]
     values = [[] for _ in range(config.n_layer)]
     losses = []
@@ -139,37 +143,49 @@ def evaluate_validation(state_dict, val_docs, uchars, BOS):
 
 
 def training_loop(corpus_name, num_steps, resume_from=None):
-    """Main training loop"""
-    print(f"Loading {corpus_name} corpus...")
+    """Main training loop with JSON logging"""
+    print("=" * 70)
+    print(f"🚀 MICROGPT TRAINING")
+    print(f"   Corpus: {corpus_name}")
+    print(f"   Steps: {num_steps}")
+    print(f"   Architecture: {config.n_layer}L/{config.n_head}H/{config.n_embd}D")
+    print("=" * 70)
+    
+    print(f"\n📚 Loading {corpus_name} corpus...")
     train_docs = load_corpus(corpus_name, "train")
     val_docs = load_corpus(corpus_name, "val")
-    print(f"Train docs: {len(train_docs)}, Val docs: {len(val_docs)}")
+    print(f"   Train docs: {len(train_docs)}")
+    print(f"   Val docs: {len(val_docs)}")
     
     # Build vocabulary
     uchars = sorted(set(''.join(train_docs)))
     BOS = len(uchars)
     vocab_size = len(uchars) + 1
-    print(f"Vocabulary size: {vocab_size}")
+    print(f"   Vocabulary size: {vocab_size}")
     
     # Initialize or resume
     start_step = 0
     if resume_from:
-        print(f"Resuming from {resume_from}")
+        print(f"\n📂 Resuming from {resume_from}")
         state_dict, start_step, uchars = load_checkpoint(resume_from)
         BOS = len(uchars)
     else:
-        print("Initializing model...")
+        print("\n🎲 Initializing model...")
         state_dict = initialize_model(vocab_size)
     
     # Flatten parameters
     params = [p for mat in state_dict.values() for row in mat for p in row]
-    print(f"Parameters: {len(params)}")
+    print(f"   Total parameters: {len(params):,}")
     
     # Adam buffers
     m = [0.0] * len(params)
     v = [0.0] * len(params)
     
-    # Training history for visualization
+    # Setup logging
+    Path(config.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+    json_log_path = Path(config.checkpoint_dir) / f"{corpus_name}_training_log.jsonl"
+    
+    # Training history
     history = {
         'train_loss': [],
         'val_loss': [],
@@ -178,10 +194,20 @@ def training_loop(corpus_name, num_steps, resume_from=None):
         'timestamps': [],
         'corpus': corpus_name,
         'total_params': len(params),
-        'vocab_size': vocab_size
+        'vocab_size': vocab_size,
+        'config': {
+            'n_embd': config.n_embd,
+            'n_head': config.n_head,
+            'n_layer': config.n_layer,
+            'block_size': config.block_size,
+            'learning_rate': config.learning_rate,
+        }
     }
     
-    print(f"\nTraining for {num_steps} steps...\n")
+    print(f"\n{'─' * 70}")
+    print(f"🔥 TRAINING STARTED")
+    print(f"{'─' * 70}\n")
+    
     start_time = datetime.now()
     
     # Training loop
@@ -196,7 +222,7 @@ def training_loop(corpus_name, num_steps, resume_from=None):
         loss = forward_pass(tokens, state_dict)
         loss.backward()
         
-        # Adam update - COPY from microgpt.py lines 102-109
+        # Adam update
         lr_t = config.learning_rate * (1 - step / num_steps)
         for i, p in enumerate(params):
             m[i] = config.beta1 * m[i] + (1 - config.beta1) * p.grad
@@ -206,16 +232,36 @@ def training_loop(corpus_name, num_steps, resume_from=None):
             p.data -= lr_t * m_hat / (v_hat ** 0.5 + config.eps_adam)
             p.grad = 0
         
-        # Progress
+        # Progress logging
         if (step + 1) % 100 == 0:
             elapsed = (datetime.now() - start_time).total_seconds()
-            print(f"step {step+1:4d} / {num_steps:4d} | loss {loss.data:.4f} | lr {lr_t:.6f} | time {elapsed:.1f}s")
+            steps_per_sec = (step + 1) / elapsed if elapsed > 0 else 0
+            eta = (num_steps - step - 1) / steps_per_sec if steps_per_sec > 0 else 0
+            
+            print(f"step {step+1:5d}/{num_steps:5d} | "
+                  f"loss {loss.data:6.4f} | "
+                  f"lr {lr_t:.6f} | "
+                  f"{elapsed:7.1f}s | "
+                  f"{steps_per_sec:5.2f} step/s | "
+                  f"ETA {eta/60:5.1f}m")
             
             # Record history
             history['train_loss'].append(loss.data)
             history['steps'].append(step + 1)
             history['learning_rates'].append(lr_t)
             history['timestamps'].append(elapsed)
+            
+            # Write JSON log
+            log_entry = {
+                'step': step + 1,
+                'train_loss': loss.data,
+                'learning_rate': lr_t,
+                'elapsed_seconds': elapsed,
+                'steps_per_second': steps_per_sec,
+                'timestamp': datetime.now().isoformat()
+            }
+            with open(json_log_path, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
         
         # Checkpoint
         if (step + 1) % config.checkpoint_interval == 0:
@@ -224,18 +270,56 @@ def training_loop(corpus_name, num_steps, resume_from=None):
         # Validation
         if (step + 1) % config.val_interval == 0:
             val_loss = evaluate_validation(state_dict, val_docs, uchars, BOS)
-            print(f"       validation loss: {val_loss:.4f}")
+            print(f"{' ' * 23}✓ val loss: {val_loss:.4f}")
             history['val_loss'].append(val_loss)
+            
+            # Append validation to JSON log
+            log_entry = {
+                'step': step + 1,
+                'val_loss': val_loss,
+                'timestamp': datetime.now().isoformat()
+            }
+            with open(json_log_path, 'a') as f:
+                f.write(json.dumps(log_entry) + '\n')
     
     # Final checkpoint
     save_checkpoint(state_dict, num_steps, corpus_name, uchars)
     
-    # Save training history
+    # Save training history (pickle for Python consumption)
     history_path = Path(config.checkpoint_dir) / f"{corpus_name}_history.pkl"
     with open(history_path, 'wb') as f:
         pickle.dump(history, f)
-    print(f"\nTraining history saved to {history_path}")
-    print("\nTraining complete!")
+    
+    # Save summary JSON
+    summary = {
+        'corpus': corpus_name,
+        'total_steps': num_steps,
+        'total_params': len(params),
+        'vocab_size': vocab_size,
+        'final_train_loss': history['train_loss'][-1] if history['train_loss'] else None,
+        'final_val_loss': history['val_loss'][-1] if history['val_loss'] else None,
+        'total_time_seconds': elapsed,
+        'config': history['config'],
+        'logs': {
+            'jsonl': str(json_log_path),
+            'history_pkl': str(history_path)
+        }
+    }
+    summary_path = Path(config.checkpoint_dir) / f"{corpus_name}_summary.json"
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f, indent=2)
+    
+    print(f"\n{'=' * 70}")
+    print(f"✅ TRAINING COMPLETE!")
+    print(f"{'=' * 70}")
+    print(f"📊 Logs saved:")
+    print(f"   JSONL:    {json_log_path}")
+    print(f"   History:  {history_path}")
+    print(f"   Summary:  {summary_path}")
+    print(f"\n⏱️  Total time: {elapsed/60:.1f} minutes")
+    if history['train_loss']:
+        print(f"📉 Final loss: {history['train_loss'][-1]:.4f}")
+    print(f"{'=' * 70}")
     
     return history
 
