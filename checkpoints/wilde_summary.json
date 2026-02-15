@@ -1,0 +1,19 @@
+{
+  "corpus": "wilde",
+  "total_steps": 10,
+  "total_params": 128896,
+  "vocab_size": 111,
+  "final_train_loss": null,
+  "final_val_loss": null,
+  "total_time_seconds": 451.4013702869415,
+  "config": {
+    "n_embd": 64,
+    "n_head": 4,
+    "n_layer": 2,
+    "block_size": 256
+  },
+  "logs": {
+    "jsonl": "checkpoints/wilde_training_log.jsonl",
+    "history_pkl": "checkpoints/wilde_history.pkl"
+  }
+}
