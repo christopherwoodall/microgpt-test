@@ -2,6 +2,7 @@
 """
 Interactive chat interface for MicroGPT
 Type to talk, watch the AI think in real-time
+Supports both CPU and GPU checkpoints
 """
 
 import sys
@@ -16,6 +17,14 @@ sys.setrecursionlimit(10000)
 
 from microgpt import Value, linear, softmax, rmsnorm
 import config
+
+# Try to import PyTorch for GPU support
+try:
+    import torch
+    import torch.nn.functional as F
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
 # Neon colors for terminal
 class Colors:
@@ -33,14 +42,36 @@ SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 
 def load_checkpoint(filepath):
-    """Load checkpoint"""
-    with open(filepath, 'rb') as f:
-        checkpoint = pickle.load(f)
-    return checkpoint["state_dict"], checkpoint["vocab"]
+    """Load checkpoint - auto-detects CPU vs GPU format"""
+    filepath = Path(filepath)
+    
+    # Try pickle first (CPU format)
+    try:
+        with open(filepath, 'rb') as f:
+            checkpoint = pickle.load(f)
+        
+        # Check if it's a CPU checkpoint
+        if 'state_dict' in checkpoint:
+            print(f"{Colors.GREEN}✓ Loaded CPU checkpoint{Colors.END}")
+            return checkpoint["state_dict"], checkpoint["vocab"], "cpu"
+    except (pickle.UnpicklingError, EOFError):
+        pass
+    
+    # Try torch (GPU format)
+    if TORCH_AVAILABLE:
+        try:
+            checkpoint = torch.load(filepath, map_location='cpu')
+            if 'model_state_dict' in checkpoint:
+                print(f"{Colors.CYAN}✓ Loaded GPU checkpoint{Colors.END}")
+                return checkpoint["model_state_dict"], checkpoint["vocab"], "gpu"
+        except Exception:
+            pass
+    
+    raise ValueError(f"Unknown checkpoint format: {filepath}")
 
 
-def gpt(token_id, pos_id, keys, values, state_dict):
-    """Forward pass"""
+def gpt_cpu(token_id, pos_id, keys, values, state_dict):
+    """Forward pass for CPU checkpoint"""
     tok_emb = state_dict['wte'][token_id]
     pos_emb = state_dict['wpe'][pos_id]
     x = [t + p for t, p in zip(tok_emb, pos_emb)]
@@ -82,43 +113,25 @@ def gpt(token_id, pos_id, keys, values, state_dict):
     return logits
 
 
-def generate_token(state_dict, uchars, keys, values, temperature=0.7):
-    """Generate next token"""
+def generate_response_cpu(state_dict, uchars, prompt, temperature=0.7, max_tokens=200, show_thinking=True):
+    """Generate response from CPU checkpoint with typewriter effect"""
     BOS = len(uchars)
     vocab_size = len(uchars) + 1
     
-    # Use last position
-    pos_id = sum(len(k) for k in keys[0]) if keys[0] else 0
-    token_id = BOS if pos_id == 0 else None  # Will be set by caller
-    
-    # Actually we need the last generated token
-    # This is a simplified version - the full version tracks tokens
-    return None
-
-
-def generate_response(state_dict, uchars, prompt, temperature=0.7, max_tokens=200, show_thinking=True):
-    """Generate response with real-time typewriter effect"""
-    BOS = len(uchars)
-    vocab_size = len(uchars) + 1
-    
-    # Initialize context
     keys = [[] for _ in range(config.n_layer)]
     values = [[] for _ in range(config.n_layer)]
     
-    # Tokenize prompt
     tokens = [BOS] + [uchars.index(ch) for ch in prompt if ch in uchars]
     
-    # Feed prompt through model
     for pos_id, token_id in enumerate(tokens):
-        logits = gpt(token_id, pos_id, keys, values, state_dict)
+        logits = gpt_cpu(token_id, pos_id, keys, values, state_dict)
     
-    # Generate response
     response_chars = []
     last_token = tokens[-1]
     
     for i in range(max_tokens):
         pos_id = len(tokens) + i
-        logits = gpt(last_token, pos_id - 1, keys, values, state_dict)
+        logits = gpt_cpu(last_token, pos_id - 1, keys, values, state_dict)
         probs = softmax([l / temperature for l in logits])
         next_token = random.choices(range(vocab_size), weights=[p.data for p in probs])[0]
         
@@ -128,12 +141,101 @@ def generate_response(state_dict, uchars, prompt, temperature=0.7, max_tokens=20
         char = uchars[next_token] if next_token < len(uchars) else ''
         response_chars.append(char)
         
-        # Typewriter effect
         if show_thinking:
             print(char, end='', flush=True)
-            time.sleep(0.02)  # Small delay for effect
+            time.sleep(0.02)
         
         last_token = next_token
+        tokens.append(next_token)
+    
+    return ''.join(response_chars)
+
+
+def generate_response_gpu(state_dict, uchars, prompt, temperature=0.7, max_tokens=200, show_thinking=True):
+    """Generate response from GPU checkpoint with typewriter effect"""
+    import torch
+    import torch.nn.functional as F
+    
+    BOS = len(uchars)
+    vocab_size = len(uchars) + 1
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Build vocab tensors
+    tokens = [BOS] + [uchars.index(ch) for ch in prompt if ch in uchars]
+    
+    # Extract dimensions from state dict
+    n_embd = state_dict['token_emb.weight'].shape[1]
+    n_layer = len([k for k in state_dict.keys() if 'blocks.' in k and '.ln1.weight' in k])
+    block_size = state_dict['pos_emb.weight'].shape[0]
+    
+    response_chars = []
+    
+    for i in range(max_tokens):
+        # Prepare input
+        x = torch.tensor([tokens[-block_size:]], dtype=torch.long, device=device)
+        
+        # Forward pass manually
+        B, T = x.shape
+        token_emb = F.embedding(x, state_dict['token_emb.weight'].to(device))
+        pos_emb = F.embedding(torch.arange(T, device=device), state_dict['pos_emb.weight'].to(device))
+        h = token_emb + pos_emb
+        
+        # Apply transformer blocks
+        for li in range(n_layer):
+            # Attention
+            ln1_weight = state_dict[f'blocks.{li}.ln1.weight'].to(device)
+            ln1_eps = 1e-5
+            h_norm = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + ln1_eps) * ln1_weight
+            
+            q = F.linear(h_norm, state_dict[f'blocks.{li}.attn.q_proj.weight'].to(device))
+            k = F.linear(h_norm, state_dict[f'blocks.{li}.attn.k_proj.weight'].to(device))
+            v = F.linear(h_norm, state_dict[f'blocks.{li}.attn.v_proj.weight'].to(device))
+            
+            B, T, C = q.shape
+            n_head = 4
+            head_dim = C // n_head
+            
+            q = q.view(B, T, n_head, head_dim).transpose(1, 2)
+            k = k.view(B, T, n_head, head_dim).transpose(1, 2)
+            v = v.view(B, T, n_head, head_dim).transpose(1, 2)
+            
+            scores = torch.matmul(q, k.transpose(-2, -1)) / (head_dim ** 0.5)
+            mask = torch.tril(torch.ones(T, T, device=device))
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+            attn = F.softmax(scores, dim=-1)
+            
+            out = torch.matmul(attn, v)
+            out = out.transpose(1, 2).contiguous().view(B, T, C)
+            out = F.linear(out, state_dict[f'blocks.{li}.attn.o_proj.weight'].to(device))
+            h = h + out
+            
+            # MLP
+            ln2_weight = state_dict[f'blocks.{li}.ln2.weight'].to(device)
+            h_norm = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + ln1_eps) * ln2_weight
+            mlp_out = F.linear(F.relu(F.linear(h_norm, state_dict[f'blocks.{li}.mlp.fc1.weight'].to(device))), 
+                              state_dict[f'blocks.{li}.mlp.fc2.weight'].to(device))
+            h = h + mlp_out
+        
+        # Output
+        ln_f_weight = state_dict['ln_f.weight'].to(device)
+        h = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + ln1_eps) * ln_f_weight
+        logits = F.linear(h, state_dict['head.weight'].to(device))
+        
+        # Sample
+        logits = logits[:, -1, :] / temperature
+        probs = F.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1).item()
+        
+        if next_token == BOS:
+            break
+        
+        char = uchars[next_token] if next_token < len(uchars) else ''
+        response_chars.append(char)
+        
+        if show_thinking:
+            print(char, end='', flush=True)
+            time.sleep(0.02)
+        
         tokens.append(next_token)
     
     return ''.join(response_chars)
@@ -152,7 +254,7 @@ def print_banner():
 ║   {Colors.BOLD}{Colors.GREEN}╚═╝     ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝   {Colors.CYAN}                        ║
 ║                                                                              ║
 ║   {Colors.YELLOW}Interactive Chat Interface{Colors.CYAN}                                                   ║
-║   {Colors.YELLOW}Pure Python • No Dependencies • Maximum Vibes{Colors.CYAN}                                ║
+║   {Colors.YELLOW}Pure Python • CPU & GPU Support • Maximum Vibes{Colors.CYAN}                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝{Colors.END}
 
 {Colors.CYAN}Commands:{Colors.END}
@@ -174,11 +276,11 @@ def main():
     
     # Load model
     print(f"\n{Colors.CYAN}Loading checkpoint: {args.checkpoint}...{Colors.END}")
-    state_dict, uchars = load_checkpoint(args.checkpoint)
+    checkpoint_data, uchars, checkpoint_type = load_checkpoint(args.checkpoint)
     BOS = len(uchars)
     vocab_size = len(uchars) + 1
     print(f"{Colors.GREEN}✓ Model loaded!{Colors.END}")
-    print(f"{Colors.CYAN}  Vocab size: {vocab_size} | Parameters: ~120K{Colors.END}\n")
+    print(f"{Colors.CYAN}  Type: {checkpoint_type.upper()} | Vocab: {vocab_size} tokens{Colors.END}\n")
     
     temperature = args.temp
     conversation_history = []
@@ -209,8 +311,9 @@ def main():
                     print(f"  Architecture: {config.n_layer}L/{config.n_head}H/{config.n_embd}D")
                     print(f"  Block size: {config.block_size}")
                     print(f"  Vocabulary: {vocab_size} tokens")
+                    print(f"  Checkpoint: {checkpoint_type.upper()}")
                     print(f"  Temperature: {temperature}")
-                    print(f"  Total history length: {len(conversation_history)} turns")
+                    print(f"  Total history: {len(conversation_history)} turns")
                     continue
                 
                 elif user_input.startswith('/temp'):
@@ -257,8 +360,15 @@ def main():
             
             print(f"\r{Colors.CYAN}MicroGPT{Colors.END} {Colors.YELLOW}➜{Colors.END} ", end='', flush=True)
             
-            # Generate with typewriter effect
-            response = generate_response(state_dict, uchars, context, temperature, max_tokens=300, show_thinking=True)
+            # Generate with appropriate method
+            if checkpoint_type == "cpu":
+                response = generate_response_cpu(checkpoint_data, uchars, context, temperature, max_tokens=300, show_thinking=True)
+            else:
+                if not TORCH_AVAILABLE:
+                    print(f"\n{Colors.RED}✗ ERROR: PyTorch required for GPU checkpoints{Colors.END}")
+                    print(f"  Install with: pip install torch")
+                    continue
+                response = generate_response_gpu(checkpoint_data, uchars, context, temperature, max_tokens=300, show_thinking=True)
             
             # Add to history
             conversation_history.append(("ai", response))

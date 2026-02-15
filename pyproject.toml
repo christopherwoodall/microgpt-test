@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "micro-trainer"
+version = "0.1.0"
+description = "GPU-accelerated training for MicroGPT with PyTorch CUDA"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Micro Trainer Team"}
+]
+keywords = ["gpt", "transformer", "training", "pytorch", "cuda", "nlp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.20.0",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+viz = [
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+]
+
+[project.scripts]
+microgpt-train = "scripts.train:main"
+microgpt-train-gpu = "scripts.train_gpu:main"
+microgpt-chat = "scripts.chat:main"
+microgpt-generate = "scripts.generate:main"
+microgpt-viz = "scripts.visualize:main"
+microgpt-convert = "scripts.convert_checkpoint:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/microgpt-test"
+Repository = "https://github.com/yourusername/microgpt-test"
+Documentation = "https://github.com/yourusername/microgpt-test#readme"
+
+[tool.setuptools]
+py-modules = ["microgpt", "config"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
